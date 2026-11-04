@@ -34,12 +34,14 @@ jobs:
           mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
           mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
 
-      - name: 预先禁用会导致老内核编译失败的包
+      - name: 预先禁用所有会导致老内核编译失败的包
         run: |
           sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' HATLab-GateBoard-One.config
           sed -i '/CONFIG_PACKAGE_kmod-fs-virtiofs/d' HATLab-GateBoard-One.config
+          sed -i '/CONFIG_PACKAGE_gptfdisk/d' HATLab-GateBoard-One.config
           echo "# CONFIG_PACKAGE_kmod-qca-nss-ecm is not set" >> HATLab-GateBoard-One.config
           echo "# CONFIG_PACKAGE_kmod-fs-virtiofs is not set" >> HATLab-GateBoard-One.config
+          echo "# CONFIG_PACKAGE_gptfdisk is not set" >> HATLab-GateBoard-One.config
           echo "CONFIG_PACKAGE_easytier=y" >> HATLab-GateBoard-One.config
           echo "CONFIG_PACKAGE_luci-app-easytier=y" >> HATLab-GateBoard-One.config
           echo "CONFIG_PACKAGE_kmod-tun=y" >> HATLab-GateBoard-One.config
