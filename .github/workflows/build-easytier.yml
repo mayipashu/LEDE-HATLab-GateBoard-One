@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     name: Build HATLab GateBoard-One + EasyTier
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get update
-          sudo -E apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev lib32gcc-s1 libc6-dev-i386 subversion flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler antlr3 gperf swig libtinfo5
+          sudo -E apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler antlr3 gperf swig libtinfo5
 
       - name: 集成 EasyTier 包（直接放入 package 目录）
         run: |
@@ -50,8 +50,6 @@ jobs:
           fi
           rm -rf package/qca
           rm -rf package/feeds/packages/gptfdisk
-          # 给老内核 5.4.190 加上 -fcommon 补丁，修复 gcc 11 下的多重定义错误
-          sed -i 's/-fno-common/-fcommon/g' include/target.mk
 
       - name: 运行原项目官方 build.sh
         run: |
