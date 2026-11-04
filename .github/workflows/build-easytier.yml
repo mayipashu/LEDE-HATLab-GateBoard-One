@@ -42,13 +42,17 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 写入配置
+      - name: 写入配置，禁用 virtiofs 和 nss 避免老内核编译错误
         run: |
           rm -f ./.config*
           cat ./HATLab-GateBoard-One.config > ./.config
           echo "CONFIG_PACKAGE_easytier=y" >> ./.config
           echo "CONFIG_PACKAGE_luci-app-easytier=y" >> ./.config
           echo "CONFIG_PACKAGE_kmod-tun=y" >> ./.config
+          # 禁用 virtiofs，修复 5.4.190 老内核在 gcc 11 下的编译错误
+          echo "# CONFIG_PACKAGE_kmod-fs-virtiofs is not set" >> ./.config
+          # 禁用 qca-nss-ecm，无关的高通加速包，避免编译失败
+          echo "# CONFIG_PACKAGE_kmod-qca-nss-ecm is not set" >> ./.config
           if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
             sed -i 's/# CONFIG_TARGET_ROOTFS_SQUASHFS is not set/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' ./.config
           fi
