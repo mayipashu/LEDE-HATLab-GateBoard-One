@@ -34,25 +34,22 @@ jobs:
           mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
           mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
 
-      - name: 运行原项目官方 build.sh，完全兼容旧 feeds 逻辑
+      - name: 预先禁用会导致老内核编译失败的包
+        run: |
+          sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' HATLab-GateBoard-One.config
+          sed -i '/CONFIG_PACKAGE_kmod-fs-virtiofs/d' HATLab-GateBoard-One.config
+          echo "# CONFIG_PACKAGE_kmod-qca-nss-ecm is not set" >> HATLab-GateBoard-One.config
+          echo "# CONFIG_PACKAGE_kmod-fs-virtiofs is not set" >> HATLab-GateBoard-One.config
+          echo "CONFIG_PACKAGE_easytier=y" >> HATLab-GateBoard-One.config
+          echo "CONFIG_PACKAGE_luci-app-easytier=y" >> HATLab-GateBoard-One.config
+          echo "CONFIG_PACKAGE_kmod-tun=y" >> HATLab-GateBoard-One.config
+          if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
+            sed -i 's/# CONFIG_TARGET_ROOTFS_SQUASHFS is not set/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' HATLab-GateBoard-One.config
+          fi
+
+      - name: 运行原项目官方 build.sh
         run: |
           bash ./helper/build.sh
-
-      - name: 写入 EasyTier 配置并重新 defconfig
-        run: |
-          echo "CONFIG_PACKAGE_easytier=y" >> ./.config
-          echo "CONFIG_PACKAGE_luci-app-easytier=y" >> ./.config
-          echo "CONFIG_PACKAGE_kmod-tun=y" >> ./.config
-          # 禁用 virtiofs 和 nss 避免老内核编译错误
-          echo "# CONFIG_PACKAGE_kmod-fs-virtiofs is not set" >> ./.config
-          echo "# CONFIG_PACKAGE_kmod-qca-nss-ecm is not set" >> ./.config
-          if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
-            sed -i 's/# CONFIG_TARGET_ROOTFS_SQUASHFS is not set/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' ./.config
-          fi
-          make defconfig
-
-      - name: 编译固件
-        run: make -j$(nproc) || make -j1 V=s
 
       - name: 收集产物
         run: |
