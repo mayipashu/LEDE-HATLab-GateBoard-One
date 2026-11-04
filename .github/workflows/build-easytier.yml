@@ -34,7 +34,7 @@ jobs:
           mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
           mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
 
-      - name: 彻底删除所有会导致老内核编译失败的包配置
+      - name: 彻底删除所有会导致老内核编译失败的包
         run: |
           sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' HATLab-GateBoard-One.config
           sed -i '/CONFIG_PACKAGE_kmod-fs-virtiofs/d' HATLab-GateBoard-One.config
@@ -48,9 +48,10 @@ jobs:
           if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
             sed -i 's/# CONFIG_TARGET_ROOTFS_SQUASHFS is not set/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' HATLab-GateBoard-One.config
           fi
-          # 直接在 package 目录下删除失败包的源码目录，100% 确保不会被编译
           rm -rf package/qca
           rm -rf package/feeds/packages/gptfdisk
+          # 给老内核 5.4.190 加上 -fcommon 补丁，修复 gcc 11 下的多重定义错误
+          sed -i 's/-fno-common/-fcommon/g' include/target.mk
 
       - name: 运行原项目官方 build.sh
         run: |
