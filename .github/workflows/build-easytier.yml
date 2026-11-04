@@ -1,0 +1,74 @@
+name: Build GateBoard firmware with EasyTier
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable_squashfs:
+        description: 启用 SquashFS 镜像（默认 EXT4）
+        type: boolean
+        default: false
+      extra_packages:
+        description: 额外要安装的包名（空格分隔）
+        required: false
+
+jobs:
+  build:
+    name: Build HATLab GateBoard-One + EasyTier
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+        with:
+          repository: maomaowuxian/LEDE-HATLab-GateBoard-One
+          ref: main
+          fetch-depth: 1
+
+      - name: 安装编译依赖
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get update
+          sudo -E apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler antlr3 gperf swig libtinfo5
+
+      - name: 集成 EasyTier 包
+        run: |
+          git clone --depth 1 https://github.com/EasyTier/luci-app-easytier.git package/luci-app-easytier
+          echo "src-git easytier https://github.com/EasyTier/luci-app-easytier.git" >> feeds.conf.default
+
+      - name: 应用 feeds
+        run: |
+          cat ./HATLab-GateBoard-One.feeds > ./feeds.conf.default
+          echo "src-git easytier https://github.com/EasyTier/luci-app-easytier.git" >> ./feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 写入配置
+        run: |
+          rm -f ./.config*
+          cat ./HATLab-GateBoard-One.config > ./.config
+          echo "CONFIG_PACKAGE_easytier=y" >> ./.config
+          echo "CONFIG_PACKAGE_luci-app-easytier=y" >> ./.config
+          echo "CONFIG_PACKAGE_kmod-tun=y" >> ./.config
+          if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
+            sed -i 's/# CONFIG_TARGET_ROOTFS_SQUASHFS is not set/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' ./.config
+          fi
+          make defconfig
+
+      - name: 下载全部源码
+        run: make download -j8
+
+      - name: 编译固件
+        run: make -j$(nproc) || make -j1 V=s
+
+      - name: 收集产物
+        run: |
+          mkdir -p ./artifact/firmware
+          find ./bin/targets/ -type f \( -name "openwrt-*.img.gz" -o -name "openwrt-*.img" -o -name "openwrt-*.tar.gz" -o -name "*.ipk" \) -exec cp -f {} ./artifact/firmware/ \;
+          ls -lh ./artifact/firmware/
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: GateBoard-EasyTier-Firmware
+          path: ./artifact/firmware/
+          retention-days: 30
