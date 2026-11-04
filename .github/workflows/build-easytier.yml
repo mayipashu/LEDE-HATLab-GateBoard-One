@@ -7,9 +7,6 @@ on:
         description: 启用 SquashFS 镜像（默认 EXT4）
         type: boolean
         default: false
-      extra_packages:
-        description: 额外要安装的包名（空格分隔）
-        required: false
 
 jobs:
   build:
@@ -30,14 +27,18 @@ jobs:
           sudo -E apt-get update
           sudo -E apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev lib32gcc-s1 libc6-dev-i386 subversion flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler antlr3 gperf swig libtinfo5
 
-      - name: 集成 EasyTier 包
+      - name: 集成 EasyTier 包（直接放入 package 目录，不修改 feeds）
         run: |
-          git clone --depth 1 https://github.com/EasyTier/luci-app-easytier.git package/luci-app-easytier
+          git clone --depth 1 https://github.com/EasyTier/luci-app-easytier.git tmp/luci-app-easytier
+          mv tmp/luci-app-easytier/easytier package/easytier
+          mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
+          mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
+          echo "EasyTier packages installed:"
+          ls -la package/easytier/ package/luci-app-easytier/
 
-      - name: 应用 feeds
+      - name: 应用 feeds（使用原项目锁定的 feeds，不修改）
         run: |
           cat ./HATLab-GateBoard-One.feeds > ./feeds.conf.default
-          echo "src-git easytier https://github.com/EasyTier/luci-app-easytier.git" >> ./feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
