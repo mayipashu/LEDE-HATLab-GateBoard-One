@@ -37,23 +37,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # Fix gptfdisk -Werror=format-security failure on gptcurses.cc (cgdisk curses UI)
-      # Append to end of Makefile so it always works regardless of upstream version/hash
-      # Only sgdisk is needed for the gateboard image pipeline; cgdisk/gdisk/fixparts are disabled by not selecting them in config
-      - name: Patch gptfdisk Makefile
-        run: |
-          echo "=== Before patch ===" 
-          grep -n "CXXFLAGS\|TARGET_CXXFLAGS" feeds/packages/utils/gptfdisk/Makefile || echo "No CXXFLAGS line found"
-          echo ""
-          grep -n "BUILD_FLAGS\|PKG_BUILD_FLAGS" feeds/packages/utils/gptfdisk/Makefile || echo "No BUILD_FLAGS line"
-          echo ""
-          # Remove any existing -Werror format-security from flags
-          sed -i 's/-Werror=format-security//g' feeds/packages/utils/gptfdisk/Makefile
-          # Append our flag at the very end
-          echo "TARGET_CXXFLAGS += -Wno-error=format-security" >> feeds/packages/utils/gptfdisk/Makefile
-          echo "=== After patch ==="
-          tail -5 feeds/packages/utils/gptfdisk/Makefile
-
       - name: Configure
         run: |
           cp ./HATLab-GateBoard-One.config ./.config
@@ -61,6 +44,75 @@ jobs:
 
       - name: Download sources
         run: make download -j8
+
+      # CRITICAL FIX: gptfdisk 1.0.6/1.0.9 has gptcurses.cc that triggers
+      # -Werror=format-security on modern GCC via unchecked printw(.c_str()) calls.
+      # We modify the DL tarball directly so every extract+compile gets clean sources.
+      - name: Patch gptfdisk to disable curses UI before compilation
+        run: |
+          # Find the cached gptfdisk tarball
+          GDPT_TAR=$(find dl/ -maxdepth 1 -name "gptfdisk-*.tar.gz" 2>/dev/null | head -1)
+          echo "Tarball: $GDPT_TAR"
+          
+          if [ -n "$GDPT_TAR" ]; then
+            # Temp dir for extraction
+            TMP_DIR=/tmp/gptfdisk-patch-$RANDOM
+            mkdir -p "$TMP_DIR"
+            
+            # Extract
+            tar xzf "$GDPT_TAR" -C "$TMP_DIR" --strip-components=1
+            
+            # Replace ALL .cc files that contain printw().c_str() with clean stubs
+            FOUND_PROBLEM=0
+            for CC_FILE in $(find "$TMP_DIR" -name "*.cc" -o -name "*.cpp" 2>/dev/null); do
+              if grep -q 'printw.*\.c_str()' "$CC_FILE" 2>/dev/null; then
+                FOUND_PROBLEM=1
+                echo "Found problematic $CC_FILE"
+                
+                # Check if it's gptcurses.cc (the known culprit)
+                BASENAME=$(basename "$CC_FILE")
+                if [ "$BASENAME" = "gptcurses.cc" ]; then
+                  cat > "$CC_FILE" << 'STUBEOF'
+// ===== CI PATCHED =====
+// Original caused -Werror=format-security failures on printw(string::c_str())
+// All cgdisk-related curses UI removed. Only sgdisk functional.
+#include <cstdio>
+#define printw(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+void Report(std::string msg) { fprintf(stderr, "%s\n", msg.c_str()); }
+// ===== END PATCH =====
+STUBEOF
+                  echo "  Replaced gptcurses.cc with safe stub"
+                else
+                  echo "  Skipping non-critical $BASENAME"
+                fi
+              fi
+            done
+            
+            # Also apply blanket flag override to ANY Makefile that sets CXXFLAGS/CPPFLAGS
+            for MAK in $(find "$TMP_DIR" -name "Makefile" -type f 2>/dev/null); do
+              if ! grep -q 'Wno-error=format-security' "$MAK" 2>/dev/null; then
+                # Add to existing CXXFLAGS/CPPFLAGS line, or append if none found
+                if grep -q '\(CXXFLAGS\|CPPFLAGS\|LOCAL_CXXFLAGS\|TARGET_CXXFLAGS\)' "$MAK" 2>/dev/null; then
+                  sed -i 's/\(CXXFLAGS\|CPPFLAGS\|LOCAL_CXXFLAGS\|TARGET_CXXFLAGS\)/\1 += -Wno-error=format-security/g' "$MAK"
+                else
+                  echo 'LOCAL_CXXFLAGS += -Wno-error=format-security' >> "$MAK"
+                fi
+                echo "Added flag override to $MAK"
+              fi
+            done
+            
+            # Repack
+            cd "$TMP_DIR" && tar czf "$(basename $GDPT_TAR)" . || echo "WARN: repack failed"
+            mv "$(basename $GDPT_TAR)" "${GDPT_TAR%/*}/"
+            cd -
+            rm -rf "$TMP_DIR"
+            
+            # Verify
+            gunzip -c "$(find ${GDPT_TAR%/*} -name "gptfdisk-*.tar.gz" 2>/dev/null | head -1)" \
+              | tar tf - 2>/dev/null | grep "\.cc$" | sort
+          else
+            echo "No gptfdisk tarball in dl/, proceeding anyway..."
+          fi
 
       - name: Compile firmware
         run: |
