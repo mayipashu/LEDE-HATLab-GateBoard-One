@@ -1,56 +1,22 @@
-name: Build GateBoard firmware with EasyTier (SDK)
+name: Build GateBoard EasyTier IPK
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      enable_squashfs:
-        description: 启用 SquashFS 镜像（默认 EXT4）
-        type: boolean
-        default: false
 
 jobs:
   build:
-    name: Build HATLab GateBoard-One + EasyTier
+    name: Download prebuilt EasyTier for mipsel_24kc
     runs-on: ubuntu-22.04
     steps:
-      - name: 安装基础依赖
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo -E apt-get update
-          sudo -E apt-get -y install wget tar xz-utils git
-
-      - name: 下载官方 OpenWrt 21.02 mt7621 SDK
-        run: |
-          wget -q https://downloads.openwrt.org/releases/21.02.7/targets/ramips/mt7621/openwrt-sdk-21.02.7-ramips-mt7621_gcc-8.4.0_musl.Linux-x86_64.tar.xz
-          tar -xf openwrt-sdk-*.tar.xz
-          mv openwrt-sdk-* openwrt-sdk
-          cd openwrt-sdk
-          echo "src-git luci https://git.openwrt.org/project/luci.git^fe09ab990256d8b63e76cc1ab2435baef921b8b4" >> feeds.conf.default
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: 集成 EasyTier 包
-        run: |
-          cd openwrt-sdk
-          git clone --depth 1 https://github.com/EasyTier/luci-app-easytier.git tmp/luci-app-easytier
-          mv tmp/luci-app-easytier/easytier package/easytier
-          mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
-          mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
-
-      - name: 编译 EasyTier 包
-        run: |
-          cd openwrt-sdk
-          make package/easytier/compile -j$(nproc)
-          make package/luci-app-easytier/compile -j$(nproc)
-
-      - name: 收集产物
+      - name: 下载 EasyTier v2.7.0 mipsel_24kc 官方预编译包
         run: |
           mkdir -p ./artifact/firmware
-          find openwrt-sdk/bin/packages/ -type f -name "*.ipk" -exec cp -f {} ./artifact/firmware/ \;
-          ls -lh ./artifact/firmware/
+          cd ./artifact/firmware
+          wget -q https://github.com/EasyTier/EasyTier/releases/download/v2.7.0/EasyTier-v2.7.0-mipsel_24kc-22.03.7.zip
+          unzip -q EasyTier-v2.7.0-mipsel_24kc-22.03.7.zip
+          ls -lh .
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
