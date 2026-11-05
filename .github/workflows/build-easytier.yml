@@ -1,4 +1,4 @@
-name: Build GateBoard firmware with EasyTier (OpenWrt 21.02 official)
+name: Build GateBoard firmware with EasyTier (SDK)
 
 on:
   push:
@@ -15,87 +15,46 @@ jobs:
     name: Build HATLab GateBoard-One + EasyTier
     runs-on: ubuntu-22.04
     steps:
-      - name: 检出官方 OpenWrt 21.02 分支
-        uses: actions/checkout@v4
-        with:
-          repository: openwrt/openwrt
-          ref: openwrt-21.02
-          fetch-depth: 1
-
-      - name: 安装编译依赖
+      - name: 安装基础依赖
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get update
-          sudo -E apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev lib32gcc-s1 libc6-dev-i386 subversion flex uglifyjs gcc-multilib g++-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler antlr3 gperf swig libtinfo5
+          sudo -E apt-get -y install wget tar xz-utils git
 
-      - name: 应用 HATLab GateBoard-One 设备补丁
+      - name: 下载官方 OpenWrt 21.02 mt7621 SDK
         run: |
-          # 从原项目复制 GateBoard-One 的设备支持文件
-          git clone --depth 1 https://github.com/maomaowuxian/LEDE-HATLab-GateBoard-One.git tmp/gateboard
-          cp -rf tmp/gateboard/target/linux/ramips/dts/mt7621_hatlab_gateboard-one.dts target/linux/ramips/dts/
-          # 添加设备到 mt7621 配置
-          echo 'define Device/hatlab_gateboard-one
-  $(Device/dsa-migration)
-  $(Device/uimage-lz71)
-  DEVICE_VENDOR := HATLab
-  DEVICE_MODEL := GateBoard-One
-  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7610e wpad-basic-wolfssl kmod-usb2 kmod-usb3
-  IMAGE/sysupgrade.bin := append-rootfs | pad-128k | sysupgrade-tar rootfs=$$$$@ | append-metadata
-endef
-TARGET_DEVICES += hatlab_gateboard-one' >> target/linux/ramips/image/mt7621.mk
+          wget -q https://downloads.openwrt.org/releases/21.02.7/targets/ramips/mt7621/openwrt-sdk-21.02.7-ramips-mt7621_gcc-8.4.0_musl.Linux-x86_64.tar.xz
+          tar -xf openwrt-sdk-*.tar.xz
+          mv openwrt-sdk-* openwrt-sdk
+          cd openwrt-sdk
+          echo "src-git luci https://git.openwrt.org/project/luci.git^fe09ab990256d8b63e76cc1ab2435baef921b8b4" >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-      - name: 集成 EasyTier 包（直接放入 package 目录）
+      - name: 集成 EasyTier 包
         run: |
+          cd openwrt-sdk
           git clone --depth 1 https://github.com/EasyTier/luci-app-easytier.git tmp/luci-app-easytier
           mv tmp/luci-app-easytier/easytier package/easytier
           mv tmp/luci-app-easytier/easytier-noweb package/easytier-noweb
           mv tmp/luci-app-easytier/luci-app-easytier package/luci-app-easytier
 
-      - name: 配置 GateBoard-One + EasyTier
+      - name: 编译 EasyTier 包
         run: |
-          cat > .config <<EOF
-CONFIG_TARGET_ramips=y
-CONFIG_TARGET_ramips_mt7621=y
-CONFIG_TARGET_ramips_mt7621_DEVICE_hatlab_gateboard-one=y
-CONFIG_TARGET_ROOTFS_EXT4FS=y
-CONFIG_TARGET_EXT4_JOURNAL=y
-CONFIG_PACKAGE_easytier=m
-CONFIG_PACKAGE_luci-app-easytier=m
-CONFIG_PACKAGE_kmod-tun=y
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-mod-admin-full=y
-CONFIG_PACKAGE_luci-mod-network=y
-CONFIG_PACKAGE_luci-mod-status=y
-CONFIG_PACKAGE_luci-mod-system=y
-CONFIG_PACKAGE_luci-proto-ipv6=y
-CONFIG_PACKAGE_luci-proto-ppp=y
-CONFIG_PACKAGE_luci-ssl=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-CONFIG_PACKAGE_uhttpd=y
-CONFIG_PACKAGE_uhttpd-mod-ubus=y
-EOF
-          if [ "${{ inputs.enable_squashfs }}" = "true" ]; then
-            sed -i 's/CONFIG_TARGET_ROOTFS_EXT4FS=y/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' .config
-          fi
-          make defconfig
-
-      - name: 下载全部源码
-        run: make download -j8
-
-      - name: 编译固件
-        run: make -j$(nproc) || make -j1 V=s
+          cd openwrt-sdk
+          make package/easytier/compile -j$(nproc)
+          make package/luci-app-easytier/compile -j$(nproc)
 
       - name: 收集产物
         run: |
           mkdir -p ./artifact/firmware
-          find ./bin/targets/ -type f \( -name "openwrt-*.img.gz" -o -name "openwrt-*.img" -o -name "openwrt-*.tar.gz" -o -name "*.ipk" \) -exec cp -f {} ./artifact/firmware/ \;
+          find openwrt-sdk/bin/packages/ -type f -name "*.ipk" -exec cp -f {} ./artifact/firmware/ \;
           ls -lh ./artifact/firmware/
 
-      - name: 上传固件
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: GateBoard-EasyTier-Firmware
+          name: GateBoard-EasyTier-IPK
           path: ./artifact/firmware/
           retention-days: 30
