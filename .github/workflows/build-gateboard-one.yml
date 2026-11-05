@@ -39,6 +39,7 @@ jobs:
 
       - name: Configure
         run: |
+          # Explicitly skip curses gptfdisk (cgdisk/gdisk) to avoid -Werror=format-security
           cp ./HATLab-GateBoard-One.config ./.config
           make defconfig
 
