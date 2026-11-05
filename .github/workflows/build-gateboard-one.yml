@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - '.github/workflows/build-gateboard-one.yml'
+      - 'HATLab-GateBoard-One.config'
 
 jobs:
   build:
