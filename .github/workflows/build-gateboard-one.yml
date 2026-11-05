@@ -36,13 +36,26 @@ jobs:
           cp ./HATLab-GateBoard-One.feeds ./feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          # Patch gptfdisk 1.0.6/1.0.9: skip -Werror=format-security on curses gptcurses.cc
-          # (cgdisk/gdisk pass .c_str() directly to printw() without format string literal)
-          sed -i 's/TARGET_CXXFLAGS += -std=c++11 -fno-rtti/TARGET_CXXFLAGS += -std=c++11 -fno-rtti -Wno-error=format-security/' feeds/packages/utils/gptfdisk/Makefile
+
+      # Fix gptfdisk -Werror=format-security failure on gptcurses.cc (cgdisk curses UI)
+      # Append to end of Makefile so it always works regardless of upstream version/hash
+      # Only sgdisk is needed for the gateboard image pipeline; cgdisk/gdisk/fixparts are disabled by not selecting them in config
+      - name: Patch gptfdisk Makefile
+        run: |
+          echo "=== Before patch ===" 
+          grep -n "CXXFLAGS\|TARGET_CXXFLAGS" feeds/packages/utils/gptfdisk/Makefile || echo "No CXXFLAGS line found"
+          echo ""
+          grep -n "BUILD_FLAGS\|PKG_BUILD_FLAGS" feeds/packages/utils/gptfdisk/Makefile || echo "No BUILD_FLAGS line"
+          echo ""
+          # Remove any existing -Werror format-security from flags
+          sed -i 's/-Werror=format-security//g' feeds/packages/utils/gptfdisk/Makefile
+          # Append our flag at the very end
+          echo "TARGET_CXXFLAGS += -Wno-error=format-security" >> feeds/packages/utils/gptfdisk/Makefile
+          echo "=== After patch ==="
+          tail -5 feeds/packages/utils/gptfdisk/Makefile
 
       - name: Configure
         run: |
-          # Explicitly skip curses gptfdisk (cgdisk/gdisk) to avoid -Werror=format-security
           cp ./HATLab-GateBoard-One.config ./.config
           make defconfig
 
