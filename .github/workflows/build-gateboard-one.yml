@@ -36,6 +36,9 @@ jobs:
           cp ./HATLab-GateBoard-One.feeds ./feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          # Patch gptfdisk 1.0.6/1.0.9: skip -Werror=format-security on curses gptcurses.cc
+          # (cgdisk/gdisk pass .c_str() directly to printw() without format string literal)
+          sed -i 's/TARGET_CXXFLAGS += -std=c++11 -fno-rtti/TARGET_CXXFLAGS += -std=c++11 -fno-rtti -Wno-error=format-security/' feeds/packages/utils/gptfdisk/Makefile
 
       - name: Configure
         run: |
