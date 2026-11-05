@@ -10,12 +10,12 @@ jobs:
     name: Download prebuilt EasyTier for mipsel_24kc
     runs-on: ubuntu-22.04
     steps:
-      - name: 下载 EasyTier v2.7.0 mipsel_24kc 官方预编译包
+      - name: 下载 EasyTier v2.6.4 mipsel_24kc 官方预编译包
         run: |
           mkdir -p ./artifact/firmware
           cd ./artifact/firmware
-          wget -q https://github.com/EasyTier/EasyTier/releases/download/v2.7.0/EasyTier-v2.7.0-mipsel_24kc-22.03.7.zip
-          unzip -q EasyTier-v2.7.0-mipsel_24kc-22.03.7.zip
+          wget -q https://github.com/EasyTier/luci-app-easytier/releases/download/v2.6.4/EasyTier-v2.6.4-mipsel_24kc-22.03.7.zip
+          unzip -q EasyTier-v2.6.4-mipsel_24kc-22.03.7.zip
           ls -lh .
 
       - name: 上传产物
