@@ -1,6 +1,8 @@
 name: Build GateBoard firmware with EasyTier (OpenWrt 21.02 official)
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       enable_squashfs:
@@ -32,7 +34,6 @@ jobs:
           # 从原项目复制 GateBoard-One 的设备支持文件
           git clone --depth 1 https://github.com/maomaowuxian/LEDE-HATLab-GateBoard-One.git tmp/gateboard
           cp -rf tmp/gateboard/target/linux/ramips/dts/mt7621_hatlab_gateboard-one.dts target/linux/ramips/dts/
-          cp -rf tmp/gateboard/target/linux/ramips/mt7621/base-files/etc/board.d/98-migrate-settings target/linux/ramips/mt7621/base-files/etc/board.d/ 2>/dev/null || true
           # 添加设备到 mt7621 配置
           echo 'define Device/hatlab_gateboard-one
   $(Device/dsa-migration)
