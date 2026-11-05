@@ -52,7 +52,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p ./artifact/firmware
-          find ./bin/targets/ -type f \( -name "*gateboard*" -o -name "*.img.gz" -o -name "*.bin" -o -name "*.itb" \) -exec cp -f {} ./artifact/firmware/ \;
+          find ./bin/targets/ -type f \( -name "*gateboard*" -o -name "*.img" -o -name "*.img.gz" -o -name "*.bin" -o -name "*.itb" \) -exec cp -f {} ./artifact/firmware/ \;
           cp -f ./bin/targets/*/*/*sha256sums ./artifact/firmware/ 2>/dev/null || true
           ls -lh ./artifact/firmware/
 
