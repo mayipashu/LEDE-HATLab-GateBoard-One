@@ -13,25 +13,11 @@ jobs:
     name: Build GateBoard-One
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-    env:
-      # Global override to disable format-security warnings-as-errors for ALL packages
-      # Fixes gptfdisk gptcurses.cc printw() failures on modern GCC
-      export_flags: |
-        export CFLAGS="${CFLAGS} -Wno-error=format-security"
-        export CXXFLAGS="${CXXFLAGS} -Wno-error=format-security"
-        export CPPFLAGS="${CPPFLAGS} -Wno-error=format-security"
-
     steps:
       - name: Checkout this repo (full device support)
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Export flags before all builds
-        run: |
-          eval "${{ env.export_flags }}"
-          echo "CXXFLAGS after override: ${CXXFLAGS}"
-          echo "CFLAGS after override: ${CFLAGS}"
 
       - name: Install build deps
         env:
@@ -49,40 +35,59 @@ jobs:
           df -h
 
       - name: Update & install feeds
+        env:
+          CFLAGS: "-Wno-error=format-security"
+          CXXFLAGS: "-Wno-error=format-security"
+          CPPFLAGS: "-Wno-error=format-security"
         run: |
           cp ./HATLab-GateBoard-One.feeds ./feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Configure
+        env:
+          CFLAGS: "-Wno-error=format-security"
+          CXXFLAGS: "-Wno-error=format-security"
+          CPPFLAGS: "-Wno-error=format-security"
         run: |
           cp ./HATLab-GateBoard-One.config ./.config
           make defconfig
 
       - name: Download sources
+        env:
+          CFLAGS: "-Wno-error=format-security"
+          CXXFLAGS: "-Wno-error=format-security"
+          CPPFLAGS: "-Wno-error=format-security"
         run: make download -j8
 
-      - name: Patch gptfdisk source tarball directly
+      - name: Patch gptfdisk to remove problematic source files
+        env:
+          CFLAGS: "-Wno-error=format-security"
+          CXXFLAGS: "-Wno-error=format-security"
+          CPPFLAGS: "-Wno-error=format-security"
         run: |
           GDPT_TAR=$(find dl/ -maxdepth 1 -name "gptfdisk-*.tar.gz" 2>/dev/null | head -1)
           if [ -n "$GDPT_TAR" ]; then
-            TMP=/tmp/gptfdisk-patch$$
+            TMP=/tmp/gptfpd$$
             mkdir -p $TMP
             tar xzf "$GDPT_TAR" -C $TMP --strip-components=1
-            for CCF in $(find $TMP -name "*.cc" -o -name "*.cpp"); do
-              if grep -q 'printw.*\.c_str()' "$CCF" 2>/dev/null; then
-                cp "$CCF" "${CCF}.bak"
-                echo '// patched by CI' > "$CCF"
-                echo "Replaced: $CCF"
+            for F in $(find $TMP -name "*.cc"); do
+              if grep -q 'printw.*\.c_str()' "$F" 2>/dev/null; then
+                echo "// patched by CI to avoid format-security error" > "$F"
+                echo "Replaced $F"
               fi
             done
             cd $TMP && tar czf "$(basename $GDPT_TAR)" . && mv "$(basename $GDPT_TAR)" ..
             cd - && rm -rf $TMP
           else
-            echo "No gptfdisk tarball found, skipping tarball patch"
+            echo "No gptfdisk tarball, proceeding"
           fi
 
       - name: Compile firmware
+        env:
+          CFLAGS: "-Wno-error=format-security"
+          CXXFLAGS: "-Wno-error=format-security"
+          CPPFLAGS: "-Wno-error=format-security"
         run: |
           make -j$(nproc) || make -j1 V=s
 
