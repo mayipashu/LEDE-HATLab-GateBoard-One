@@ -157,7 +157,7 @@ jobs:
           for f in usr/bin/n2n-edge usr/bin/n2n-supernode usr/sbin/tincd \
                    etc/init.d/n2n etc/init.d/tinc etc/config/n2n \
                    www/cgi-bin/luci \
-                   etc/init.d/odhcpd usr/sbin/odhcpd usr/bin/odhcp6c \
+                   etc/init.d/odhcpd usr/sbin/odhcpd usr/sbin/odhcp6c \
                    usr/sbin/ksmbd.mountd usr/sbin/smbd \
                    usr/sbin/p910nd etc/init.d/p910nd etc/config/p910nd \
                    usr/bin/easytier-core usr/bin/easytier-cli \
@@ -165,7 +165,7 @@ jobs:
                    usr/bin/lucky etc/init.d/lucky etc/config/lucky \
                    usr/bin/frpc etc/init.d/frpc etc/config/frpc \
                    usr/bin/filebrowser etc/init.d/filebrowser etc/config/filebrowser \
-                   usr/bin/xray usr/share/xray/geoip.dat usr/share/xray/geosite.dat \
+                   usr/bin/xray \
                    usr/bin/rtp2httpd etc/init.d/rtp2httpd etc/config/rtp2httpd; do
             if [ -e "$ROOT/$f" ]; then
               echo "OK      /$f"
