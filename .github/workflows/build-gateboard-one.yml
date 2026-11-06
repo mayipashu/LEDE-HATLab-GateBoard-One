@@ -13,6 +13,9 @@ on:
       - 'package/tinc/**'
       - 'include/prereq-build.mk'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build GateBoard-One (n2n + tinc + LuCI)
@@ -111,10 +114,19 @@ jobs:
           mkdir -p ./artifact/firmware
           find ./bin/targets/ -type f \
             \( -name "*gateboard*" -o -name "*.img" -o -name "*.itb" \
-               -o -name "*sha256sums" -o -name "*.manifest" -o -name "profiles.json" \) \
+               -o -name "*sha256sums" -o -name "*.manifest" -o -name "profiles.json" \
+               -o -name "*.buildinfo" \) \
             -exec cp -f {} ./artifact/firmware/ \;
           ls -lh ./artifact/firmware/
-          cd ./artifact/firmware && sha256sum * || true
+
+      - name: Verify checksums
+        if: success()
+        run: |
+          set -euo pipefail
+          cd ./artifact/firmware
+          # kernel-debug.tar.zst 未纳入产物收集，忽略缺失项，只校验实际存在的文件
+          sha256sum -c --ignore-missing *sha256sums
+          sha256sum *
 
       - name: Prove VPN binaries are inside the image
         if: success()
@@ -143,3 +155,50 @@ jobs:
             logs/
             .config
           if-no-files-found: ignore
+
+      - name: Publish to GitHub Releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=latest
+          NOTES=$(mktemp)
+          {
+            echo "由 GitHub Actions 自动构建的 HATLab GateBoard-One 固件（滚动发布，始终为最新一次成功构建）。"
+            echo
+            echo "- 运行编号：[${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo "- 源码提交：\`${{ github.sha }}\`"
+            echo "- 构建时间（UTC）：$(date -u '+%Y-%m-%d %H:%M')"
+            echo
+            echo "### 内置软件版本"
+            echo '```'
+            grep -E '^(n2n|n2n-utils|tinc|kmod-tun|cgi-io|luci-base|luci-app-opkg|luci-ssl-openssl) ' ./artifact/firmware/*.manifest || true
+            echo '```'
+            echo
+            echo "### 文件说明"
+            echo "- \`*-ext4-combined.img\`：整机镜像（写盘 / sysupgrade 均可）"
+            echo "- \`*-ext4-rootfs.img\`：根文件系统"
+            echo "- \`*-ext4-kernel.itb\`：内核"
+            echo "- \`*.manifest\`：已安装软件包清单"
+            echo "- \`sha256sums\`：SHA-256 校验和，刷机前请核对"
+            echo
+            echo "### 已内置功能"
+            echo "- **n2n 3.0**：\`n2n-edge\` / \`n2n-supernode\` / \`n2n-benchmark\` / \`n2n-decode\` / \`n2n-keygen\`，UCI 配置 \`/etc/config/n2n\`，服务 \`/etc/init.d/n2n\`"
+            echo "- **tinc 1.1pre18**：\`/usr/sbin/tincd\`，服务 \`/etc/init.d/tinc\`"
+            echo "- **LuCI** 管理界面（\`luci-ssl-openssl\`，https）"
+            echo "- \`kmod-tun\` 已内置，n2n/tinc 无需额外安装内核模块"
+          } > "$NOTES"
+
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "HATLab GateBoard-One 固件（latest）" --latest --notes-file "$NOTES"
+
+          gh release upload "$TAG" \
+            ./artifact/firmware/*.img \
+            ./artifact/firmware/*.itb \
+            ./artifact/firmware/*.manifest \
+            ./artifact/firmware/*sha256sums \
+            --clobber
+
+          gh release edit "$TAG" --notes-file "$NOTES" --latest
+          echo "released: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG"
