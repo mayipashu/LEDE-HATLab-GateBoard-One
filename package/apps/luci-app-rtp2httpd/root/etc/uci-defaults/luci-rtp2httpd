@@ -1,0 +1,9 @@
+#!/bin/sh
+# 注册 ucitrack，让 LuCI 页面的"应用并重启"按钮生效
+uci -q batch <<-EOF >/dev/null
+	delete ucitrack.@rtp2httpd[-1]
+	add ucitrack rtp2httpd
+	set ucitrack.@rtp2httpd[-1].init=rtp2httpd
+	commit ucitrack
+EOF
+exit 0

@@ -1,0 +1,790 @@
+#!/bin/sh /etc/rc.common
+#
+# Copyright (C) 2020-2023 honwen <https://github.com/honwen>
+#
+# This is free software, licensed under the GNU General Public License v3.
+# See /LICENSE for more information.
+#
+
+START=90
+STOP=15
+
+NAME=xray
+EXTRA_COMMANDS="rules healthcheck"
+EXTRA_HELP="	rules		Start IPTABLES inject\n	healthcheck	Check if service health"
+CRON_FILE=/etc/crontabs/root
+PLUGIN_FILE=/var/run/xray-plugin
+WATCHDOG_ENDPOINT='one.one.one.one'
+WATCHDOG_ENDPOINT_IP0='1.0.0.1'
+WATCHDOG_ENDPOINT_IP1='1.1.1.1'
+PROBE_ENDPOINT='detectportal.firefox.com'
+# PROBE_ENDPOINT='accounts.gstatic.com'
+# PROBE_ENDPOINT='cp.cloudflare.com'
+
+DNSMASQDIR=$(sed -n 's+conf-dir=++p' /var/etc/dnsmasq.conf.* 2>/dev/null)
+[ "V$DNSMASQDIR" = "V" ] && DNSMASQDIR=/var/dnsmasq.d
+
+uci_get_by_name() {
+	local ret=$(uci get $NAME.$1.$2 2>/dev/null)
+	echo ${ret:=$3}
+}
+
+uci_get_by_type() {
+	local ret=$(uci get $NAME.@$1[0].$2 2>/dev/null)
+	echo ${ret:=$3}
+}
+
+uci_bool_by_name() {
+	case "$(uci_get_by_name $1 $2)" in
+	1 | on | true | yes | enabled) return 0 ;;
+	esac
+	return 1
+}
+
+uci_bool_by_type() {
+	case "$(uci_get_by_type $1 $2)" in
+	1 | on | true | yes | enabled) return 0 ;;
+	esac
+	return 1
+}
+
+xray_xudp_basekey() {
+	cache=/var/run/xray-xdup-basekey
+	if [ ! -f $cache ]; then
+		xray x25519 | tail -n 1 | sed 's+.* ++g' >$cache
+	fi
+	cat $cache
+}
+
+xray_bin() {
+	if grep -q 'v2ray-sing' ${PLUGIN_FILE} 2>/dev/null; then
+		which v2ray-sing
+	else
+		which xray
+	fi
+}
+
+random_id() {
+	$(xray_bin) uuid | cut -c1-4
+}
+
+random_port() {
+	offset=$($(xray_bin) uuid | tr -d '[a-zA-Z-]' | cut -c1-3 | sed 's+^0*++g')
+	echo $((offset + 12000)) 2>/dev/null || random_port
+}
+
+validate_server() {
+	[ "$(uci get $NAME.$1 2>/dev/null)" = "servers" ]
+}
+
+has_valid_server() {
+	for server in $@; do
+		validate_server $server && return 0
+	done
+	return 1
+}
+
+get_arg_udp() {
+	uci_bool_by_type transparent_proxy enable_udp && echo "-u"
+}
+
+get_arg_out() {
+	case "$(uci_get_by_type access_control self_proxy 1)" in
+	1) echo "-o" ;;
+	2) echo "-O" ;;
+	esac
+}
+
+get_arg_tnd() {
+	uci_bool_by_type $1 no_delay && echo "--no-delay"
+}
+
+get_server_ips() {
+	echo $(uci_get_by_name $1 server)
+	local alias=$(uci_get_by_name $1 alias)
+	if echo $alias | grep -q '@'; then
+		echo $alias | sed 's+.*@++g'
+	fi
+}
+
+get_lan_hosts() {
+	uci_bool_by_name $1 enable &&
+		echo "$(uci_get_by_name $1 type),$(uci_get_by_name $1 host)"
+}
+
+xray_cleandns() {
+	uci_bool_by_type general no_dns_injection && return 0
+
+	rm -f $DNSMASQDIR/xray.conf $DNSMASQDIR/xray-servers.conf 2>/dev/null
+	([ -x /etc/init.d/dnsmasq-extra ] && /etc/init.d/dnsmasq reload || /etc/init.d/dnsmasq restart) >/dev/null 2>&1
+}
+
+xray_injectdns() {
+	uci_bool_by_type general no_dns_injection && return 0
+
+	echo >&2 "# Info: $NAME dnsmasq injecting..."
+
+	DNSconf=$DNSMASQDIR/xray-servers.conf
+	tmpDNSconf=$DNSMASQDIR/xray.conf
+	echo "all-servers" >$tmpDNSconf
+	config_load $NAME
+	for server in $(config_foreach get_server_ips servers | sort -u | grep -v '[0-9]$'); do
+		cat <<-EOF >>$tmpDNSconf
+			ipset=/${server}/xray_spec_dst_bp
+			server=/${server}/#
+			server=/${server}/223.5.5.5
+			server=/${server}/119.29.29.29
+			server=/${server}/114.114.114.114
+			server=/${server}/80.80.80.80
+			server=/${server}/208.67.222.222#443
+			server=/${server}/208.67.220.220#5353
+		EOF
+	done
+
+	(grep -q 'no-resolv' /etc/dnsmasq.conf /etc/dnsmasq.d/* /var/dnsmasq.d/* /var/etc/dnsmasq.conf.* 2 >/dev/null) &&
+		sed "/\/#$/d" -i $tmpDNSconf
+	sort -u $tmpDNSconf | sed '/\/\//d; /\/127.0.0.1\//d' >$DNSconf
+	rm -f $tmpDNSconf
+
+	echo "server=/${WATCHDOG_ENDPOINT}/127.0.0.1#$(uci_get_by_type port_forward local_port 5300)" >>$DNSconf
+	[ -x /etc/init.d/dnsmasq-extra ] || {
+		echo "server=/${WATCHDOG_ENDPOINT}/208.67.222.222#443" >>$DNSconf
+		echo "server=/${WATCHDOG_ENDPOINT}/114.114.115.115" >>$DNSconf
+		echo "server=/${WATCHDOG_ENDPOINT}/80.80.80.80" >>$DNSconf
+	}
+
+	DNSPROBE_DOMAIN='0.alidns.com'
+	cat <<-EOF >>$DNSconf
+		server=/$DNSPROBE_DOMAIN/223.5.5.5
+		server=/$DNSPROBE_DOMAIN/119.29.29.29
+		server=/$DNSPROBE_DOMAIN/114.114.114.114
+	EOF
+
+	([ -x /etc/init.d/dnsmasq-extra ] && /etc/init.d/dnsmasq reload || /etc/init.d/dnsmasq restart) >/dev/null 2>&1
+	# wait-for-dns, timeout 10s
+	if which wait4x >/dev/null 2>&1; then # use [wait4x]
+		wait4x http http://$DNSPROBE_DOMAIN --no-redirect -q
+	elif which wait-for >/dev/null 2>&1; then # use [wait-for]
+		wait-for -t=10s http --url=http://$DNSPROBE_DOMAIN >/dev/null 2>&1
+	else # use [ping]
+		for _ in $(seq 10); do if ping -4 -q -c 1 -s 0 -W 1 -w 1 $DNSPROBE_DOMAIN >/dev/null 2>&1; then break; fi; done
+	fi
+	echo >&2 "# Info: $NAME dnsmasq injected."
+}
+
+start_rules() {
+	config_load $NAME
+	/usr/bin/${NAME}-rules \
+		-s "$(for it in $(uci_get_by_type general server); do get_server_ips $it; done | sort -u)" \
+		-l "$(uci_get_by_type transparent_proxy local_port 1234)" \
+		-B "$(uci_get_by_type access_control wan_bp_list)" \
+		-b "$(uci_get_by_type access_control wan_bp_ips)" \
+		-W "$(uci_get_by_type access_control wan_fw_list)" \
+		-w "$(uci_get_by_type access_control wan_fw_ips) $WATCHDOG_ENDPOINT_IP0  $WATCHDOG_ENDPOINT_IP1" \
+		-I "$(uci_get_by_type access_control lan_ifaces)" \
+		-d "$(uci_get_by_type access_control lan_target)" \
+		-a "$(config_foreach get_lan_hosts lan_hosts)" \
+		-e "$(uci_get_by_type access_control ipt_ext)" \
+		$(get_arg_out) $(get_arg_udp)
+}
+
+rules() {
+	pgrep -f $(xray_bin) >/dev/null || return 0
+	start_rules || /usr/bin/${NAME}-rules -f
+}
+
+gen_config_inbound_redir() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 0
+	uci_bool_by_type 'transparent_proxy' 'enable' && cat <<-EOF
+		    {
+		      "protocol": "dokodemo-door",
+		      "port": $(uci_get_by_type transparent_proxy local_port),
+		      "address": "0.0.0.0",
+		      "settings": {
+		        "network": "tcp,udp",
+		        "followRedirect": true
+		      },
+		      "sniffing": {
+		        "enabled": true,
+		        "destOverride": ["http", "tls"]
+		      },
+		      "streamSettings": {
+		        "sockopt": {
+		          "tproxy": "redirect" 
+		        }
+		      }
+		    },
+	EOF
+}
+
+gen_config_inbound_http() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 0
+	uci_bool_by_type 'http_proxy' 'enable' && cat <<-EOF
+		    {
+		      "protocol": "http",
+		      "port": $(uci_get_by_type http_proxy local_port),
+		      "address": "0.0.0.0",
+		      "sniffing": {
+		        "enabled": true,
+		        "destOverride": ["http", "tls"]
+		      },
+		    },
+	EOF
+}
+
+gen_config_inbound_socks5() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 0
+	uci_bool_by_type 'socks5_proxy' 'enable' && cat <<-EOF
+		    {
+		      "protocol": "socks",
+		      "port": $(uci_get_by_type socks5_proxy local_port),
+		      "address": "0.0.0.0",
+		      "sniffing": {
+		        "enabled": true,
+		        "destOverride": ["http", "tls"]
+		      },
+		      "settings": {
+		        "udp": true
+		      }
+		    },
+	EOF
+}
+
+gen_config_inbound_tunnel() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 0
+	uci_bool_by_type 'port_forward' 'enable' && cat <<-EOF
+		    {
+		      "protocol": "dokodemo-door",
+		      "port": $(uci_get_by_type port_forward local_port),
+		      "address": "0.0.0.0",
+		      "settings": {
+		        "address": "$(uci_get_by_type port_forward destination | sed 's+:.*++g')",
+		        "port": $(uci_get_by_type port_forward destination | sed 's+.*:++g'),
+		        "network": "tcp,udp"
+		      }
+		    },
+	EOF
+}
+
+gen_config_inbounds() {
+	cat <<-EOF | sed 's+,    +,\n    +g;s+},__$+}+g'
+		  "inbounds": [
+				$(gen_config_inbound_redir)$(gen_config_inbound_http)$(gen_config_inbound_socks5)$(gen_config_inbound_tunnel)__
+		  ],
+	EOF
+}
+
+gen_stream_setting_key() {
+	network=$1
+	security=$2
+	ws_path=$3
+	if [ "V${ws_path}" != "V" ]; then
+		echo -en "\"wsSettings\": { \"path\": \"${ws_path}\" },\n        "
+	fi
+	if [ "V${network}" = "Vquic" ]; then
+		echo -e "\"quicSettings\": {},\n        \"${security}Settings\""
+	else
+		echo "\"${security}Settings\""
+	fi
+}
+
+gen_reality_settings() {
+	uci_get_by_name $1 security | grep -q 'reality' || return
+	echo >&2 "# Info: vless@reality[utls@chrome]"
+	cat <<-EOF
+		,
+		          "fingerprint": "chrome",
+		          "publicKey": "$(uci_get_by_name $1 public_key)",
+		          "shortId": "$(uci_get_by_name $1 short_id '')",
+		          "spiderX": "/$(random_id)"
+	EOF
+}
+
+gen_xtls_flow() {
+	local security=$(uci_get_by_name $1 security | sed 's+@.*$++g' | sed 's+-.*++g')
+	local flow=$(uci_get_by_name $1 security | sed 's+@.*$++g' | sed 's+.*-++g')
+	[ "V${security}" == 'Vh2' ] && return
+	[ "V${flow}" == 'Vxtls' ] && flow='splice'
+	if [ "V${security}" == 'Vxtls' ]; then
+		echo -e "\n                \"flow\": \"xtls-rprx-${flow}\","
+	fi
+}
+
+gen_server_vless_config() {
+	local network='tcp'
+	local security=$(uci_get_by_name $1 security 'tls')
+	if echo $security | grep -q 'reality'; then
+		if echo ${security} | grep -q '^h2'; then
+			network='h2'
+		fi
+		security='reality'
+	elif echo $security | grep -q 'vision'; then
+		security='tls'
+	else
+		security=$(echo $security | sed 's+-.*++g')
+	fi
+	[ "V${security}" = "Vquic" ] && {
+		sysctl -w net.core.rmem_max=250000 >/dev/null
+		network='quic'
+		security='tls'
+	}
+	[ "V${security}" = "Vwss" ] && {
+		sysctl -w net.core.rmem_max=250000 >/dev/null
+		network='ws'
+		security='tls'
+		ws_path=$(uci_get_by_name $1 ws_path '/')
+	}
+	validate_server $1 && {
+		local serverName=$(uci_get_by_name $1 server_name)
+		[ "V$serverName" = "V" ] && serverName=$(uci_get_by_name $1 server)
+		local alias=$(uci_get_by_name $1 alias)
+		if [ "V$plugin" != "V" ]; then
+			tag="[$alias]-$(random_id)"
+		else
+			tag="[${serverName}-${network}-${security}]-$(random_id)"
+		fi
+		echo >&2 "# Debug: OutB-vless-${tag}"
+		cat <<-EOF
+			    {
+			      "tag": "OutB-vless-${tag}",
+			      "protocol": "$(uci_get_by_name $1 protocol)",
+			      "settings": {
+			        "vnext": [
+			          {
+			            "address": "$(uci_get_by_name $1 server)",
+			            "port": $(uci_get_by_name $1 server_port),
+			            "users": [
+			              {
+			                "id": "$(uci_get_by_name $1 id)",$(gen_xtls_flow $1)
+			                "encryption": "none",
+			                "level": 0
+			              }
+			            ]
+			          }
+			        ]
+			      },
+			      "streamSettings": {
+			        "sockopt": { "mark": 255 },
+			        "network": "${network}",
+			        "security": "${security}",
+			        $(gen_stream_setting_key ${network} ${security} $(uci_get_by_name $1 ws_path)): {
+			          "serverName": "${serverName}"$(gen_reality_settings $1)
+			        }
+			      }
+			    },
+		EOF
+	}
+}
+
+gen_server_trojan_config() {
+	local network='tcp'
+	local security=$(uci_get_by_name $1 security 'tls' | sed 's+-.*++g')
+	[ "V${security}" = "Vquic" ] && {
+		sysctl -w net.core.rmem_max=250000 >/dev/null
+		network='quic'
+		security='tls'
+	}
+	validate_server $1 && {
+		local serverName=$(uci_get_by_name $1 server_name)
+		[ "V$serverName" = "V" ] && serverName=$(uci_get_by_name $1 server)
+		local alias=$(uci_get_by_name $1 alias)
+		if [ "V$plugin" != "V" ]; then
+			tag="[$alias]-$(random_id)"
+		else
+			tag="[${serverName}]-$(random_id)"
+		fi
+		echo >&2 "# Debug: OutB-trojan-${tag}"
+		cat <<-EOF
+			    {
+			      "tag": "OutB-trojan-${tag}",
+			      "protocol": "$(uci_get_by_name $1 protocol)",
+			      "settings": {
+			        "servers": [
+			          {
+			            "address": "$(uci_get_by_name $1 server)",
+			            "port": $(uci_get_by_name $1 server_port),
+			            "password": "$(uci_get_by_name $1 id)",
+			            "level": 0
+			          }
+			        ]
+			      },
+			      "streamSettings": {
+			        "sockopt": { "mark": 255 },
+			        "network": "${network}",
+			        "security": "${security}",
+			        $(gen_stream_setting_key ${network} ${security}): {
+			          "serverName": "${serverName}"
+			        }
+			      }
+			    },
+		EOF
+	}
+}
+
+gen_server_shadowsocks_config() {
+	validate_server $1 && {
+		local alias=$(uci_get_by_name $1 alias)
+		if [ "V$plugin" != "V" ]; then
+			tag="[$alias]-$(random_id)"
+		else
+			tag="[$(uci_get_by_name $1 server)]-$(random_id)"
+		fi
+		echo >&2 "# Debug: OutB-ss-${tag}"
+		cat <<-EOF
+			    {
+			      "tag": "OutB-ss-${tag}",
+			      "protocol": "$(uci_get_by_name $1 protocol)",
+			      "settings": {$(get_shadowsocks_plugin_config $1)
+			        "servers": [
+			          {
+			            "address": "$(uci_get_by_name $1 server)",
+			            "port": $(uci_get_by_name $1 server_port),
+			            "password": "$(uci_get_by_name $1 id)",
+			            "method": "$(uci_get_by_name $1 method)",
+			            "uot": $(uci_bool_by_name $1 uot && echo true || echo false)
+			          }
+			        ]
+			      },
+			      "streamSettings": { "sockopt": { "mark": 255 } }
+			    },
+		EOF
+	}
+}
+
+gen_server_socks_config() {
+	validate_server $1 && {
+		local alias=$(uci_get_by_name $1 alias)
+		local plugin=$(uci_get_by_name $1 plugin)
+		local plugin_opts=$(uci_get_by_name $1 plugin_opts)
+		local server_port=$(uci_get_by_name $1 server_port)
+		if [ "V$server_port" = "V_RANDDOM_" ]; then
+			server_port=$(random_port)
+			[ "V$server_port" = "V" ] && server_port=12000
+		fi
+		if [ "V$plugin" != "V" ]; then
+			tag="[$(basename ${plugin})]-$(random_id)"
+			plugin=$(which $plugin)
+			echo >&2 "# Info: socks(:$server_port)-extra-plugin[$plugin]"
+			echo $plugin >>${PLUGIN_FILE}
+			echo "${plugin} ${plugin_opts} >/var/log/xray.$1.log 2>&1 &" |
+				sed "s+_RANDDOM_+${server_port}+g" >>${PLUGIN_FILE}.daemon.sh
+		else
+			tag="[$alias]-$(random_id)"
+		fi
+		echo >&2 "# Debug: OutB-socks-${tag}"
+		cat <<-EOF
+			    {
+			      "tag": "OutB-socks-${tag}",
+			      "protocol": "$(uci_get_by_name $1 protocol)",
+			      "settings": {
+			        "servers": [
+			          {
+			            "address": "$(uci_get_by_name $1 server)",
+			            "port": ${server_port}
+			          }
+			        ]
+			      },
+			      "streamSettings": { "sockopt": { "mark": 255 } }
+			    },
+		EOF
+	}
+}
+
+get_shadowsocks_plugin_config() {
+	local plugin=$(uci_get_by_name $1 plugin)
+	local plugin_opts=$(uci_get_by_name $1 plugin_opts)
+	if [ "V$plugin" != "V" ]; then
+		if which v2ray-sing >/dev/null 2>&1; then
+			echo '# v2ray-sing' >>${PLUGIN_FILE}
+		else
+			echo >&2 "# Err: [https://github.com/SagerNet/v2ray-core] is needed to support SIP003"
+			exit 1
+		fi
+		if [ "V$plugin" = "Vv2ray-plugin" -o "V$plugin" = "Vxray-plugin" ]; then
+			plugin="v2ray-plugin"
+		else
+			plugin=$(which $plugin)
+			echo $plugin >>${PLUGIN_FILE}
+		fi
+		echo >&2 "# Info: SIP003[$plugin]"
+		echo -e "\n        \"plugin\": \"$plugin\","
+		if [ -n "$plugin_opts" ]; then
+			echo "        \"pluginOpts\": \"$plugin_opts\","
+		fi
+	fi
+}
+
+gen_server_config() {
+	local protocol=$(uci_get_by_name $1 protocol)
+	echo >&2 "# Info: config@protocol[$protocol]"
+	if [ "V${protocol}" = "Vsocks" ]; then
+		gen_server_socks_config $1
+	elif [ "V${protocol}" = "Vvless" ]; then
+		gen_server_vless_config $1
+	elif [ "V${protocol}" = "Vtrojan" ]; then
+		gen_server_trojan_config $1
+	elif [ "V${protocol}" = "Vshadowsocks" ]; then
+		gen_server_shadowsocks_config $1
+	else
+		echo >&2 "# Err: protocol[$protocol] not supported!"
+		exit 1
+	fi
+}
+
+gen_config_outbounds() {
+	cat <<-EOF | sed 's+,    +,\n    +g'
+		  "outbounds": [
+					$(for server in $(uci_get_by_type general server); do gen_server_config $server; done)
+		    {
+		      "protocol": "blackhole",
+		      "settings": {},
+		      "tag": "blackhole"
+		    }
+		  ],
+	EOF
+}
+
+get_rules_http3() {
+	uci_bool_by_type transparent_proxy disable_http3 || return
+	echo >&2 "# Info: disable[http3]"
+	cat <<-EOF
+
+		      {
+		        "type": "field",
+		        "network": "udp",
+		        "port": 443,
+		        "outboundTag": "blackhole"
+		      },
+	EOF
+}
+
+gen_config_file() {
+	local config_file=/var/etc/$NAME.json
+	local balancer_name="balancer-$(random_id)"
+	local strategy="$(uci_get_by_type general strategy leastLoad)"
+	[ "V${strategy}" = "VleastLoad" ] && $(xray_bin) version | grep -q 'Xray' && {
+		strategy="leastPing"
+	}
+	cat <<-EOF >$config_file
+		{
+			$(gen_config_inbounds)
+			$(gen_config_outbounds)
+		  "routing": {
+		    "rules": [$(get_rules_http3)
+		      {
+		        "type": "field",
+		        "network": "tcp,udp",
+		        "balancerTag": "${balancer_name}"
+		      }
+		    ],
+		    "balancers": [{
+		      "tag": "${balancer_name}",
+		      "selector": ["OutB"],
+		      "strategy": {
+		        "type": "${strategy}"
+		      }
+		    }]
+		  },
+		  "observatory": {
+		    "subjectSelector": [ "OutB" ],
+		    "probeURL": "https://${PROBE_ENDPOINT}/success.txt",
+		    "probeInterval": "9s"
+		  },
+		  "log": {
+		    "loglevel": "warning"
+		  }
+		}
+	EOF
+	echo $config_file
+}
+
+xray_plugin_daemon() {
+	[ -e ${PLUGIN_FILE} ] && kill_all $(sort -u ${PLUGIN_FILE} | grep -v '^#')
+	[ -e ${PLUGIN_FILE}.daemon.sh ] && {
+		chmod a+x ${PLUGIN_FILE}.daemon.sh
+		${PLUGIN_FILE}.daemon.sh
+	}
+	echo >&2 "# Info: xray-plugin daemon init."
+}
+
+xray_daemon() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 0
+	if [ -e /proc/sys/fs/nr_open ] && [ -e /proc/sys/fs/file-max ]; then
+		[ $(cat /proc/sys/fs/nr_open) -lt 1048576 ] && echo 1048576 >/proc/sys/fs/nr_open   # 1048576=2^31
+		[ $(cat /proc/sys/fs/file-max) -lt 2097152 ] && echo 2097152 >/proc/sys/fs/file-max # 2097152=2^32
+		limit=$(cat /proc/sys/fs/nr_open)
+	else
+		limit=65535
+	fi
+	while (! ulimit -SHn $limit) && [ $limit -gt 1024 ]; do limit=$((limit / 2)); done
+	ulimit -SHn $limit
+	config_file=$(gen_config_file)
+	cd /var/run/xrayservice
+	xray_plugin_daemon 2>/dev/null
+	(XRAY_XUDP_BASEKEY=$(xray_xudp_basekey) $(xray_bin) run -c ${config_file} >/var/log/xray.log 2>&1) &
+	cd - >/dev/null
+	# wait-for-dns, timeout 10s
+	if which wait4x >/dev/null 2>&1; then # use [wait4x]
+		wait4x tcp 127.0.0.1:$(sed -n 's/.*"port".*: *\(.*\),/\1/p' ${config_file} | head -n1) --connection-timeout=300ms -q
+	elif which wait-for >/dev/null 2>&1; then # use [wait-for]
+		wait-for -t=10s net --address 127.0.0.1:$(sed -n 's/.*"port".*: *\(.*\),/\1/p' ${config_file} | head -n1) >/dev/null 2>&1
+	else # use [pgrep]
+		for _ in $(seq 10); do if pgrep -f $(xray_bin) >/dev/null; then break; else sleep 1; fi; done
+	fi
+	pgrep -f $(xray_bin) >/dev/null
+}
+
+start() {
+	local t0=$(date '+%s')
+	echo >&2 "# Info: starting..."
+	pgrep -f $(xray_bin) >/dev/null && return 0
+	uci_bool_by_type 'transparent_proxy' 'enable' ||
+		uci_bool_by_type 'port_forward' 'enable' ||
+		uci_bool_by_type 'http_proxy' 'enable' ||
+		uci_bool_by_type 'socks5_proxy' 'enable' ||
+		return 0
+
+	mkdir -p /var/run/xrayservice /var/etc $DNSMASQDIR
+	has_valid_server $(uci_get_by_type general server) && {
+		xray_injectdns
+		xray_daemon
+		echo >&2 "# Info: xray daemon init."
+
+		uci_bool_by_type 'transparent_proxy' 'enable' && {
+			rules
+			add_cron
+			echo >&2 "# Info: transparent proxy init."
+		}
+	}
+	echo >&2 "# Info: started. CostTime: $(($(date '+%s') - $t0))s"
+}
+
+boot() {
+	echo 'exit 0' >/var/etc/$NAME.include
+	local delay=$(uci_get_by_type general startup_delay 0)
+	(sleep $delay && start >/dev/null 2>&1) &
+	return 0
+}
+
+kill_all() {
+	for it in $@; do
+		kill -9 $(pgrep -f $it) >/dev/null 2>&1
+	done
+}
+
+stop() {
+	local t0=$(date '+%s')
+	echo >&2 "# Info: stopping..."
+	kill_all $(xray_bin)
+	/usr/bin/${NAME}-rules -f
+	if [ -f ${PLUGIN_FILE} ]; then
+		kill_all $(sort -u ${PLUGIN_FILE})
+		rm -f ${PLUGIN_FILE}*
+	fi
+	rm -rf /var/log/xray*.log
+	rm -rf /var/run/xrayservice
+	xray_cleandns
+	del_cron
+	kill_all $(xray_bin)
+	echo >&2 "# Info: stopped. CostTime: $(($(date '+%s') - $t0))s"
+}
+
+add_cron() {
+	[ -f $CRON_FILE ] || return 0
+	uci_bool_by_type transparent_proxy no_healthcheck && return 0
+
+	sed -i '/xray_healthcheck/d' $CRON_FILE
+	echo '0   */3   * * *  rm -f /var/log/xray_healthcheck.log 2>&1' >>$CRON_FILE
+	echo '*    *    * * * /etc/init.d/xray healthcheck >> /var/log/xray_healthcheck.log 2>&1' >>$CRON_FILE
+	/etc/init.d/cron restart
+}
+
+del_cron() {
+	[ -f $CRON_FILE ] || return 0
+	uci_bool_by_type transparent_proxy no_healthcheck && return 0
+
+	sed -i '/xray_healthcheck/d' $CRON_FILE
+	/etc/init.d/cron restart
+}
+
+healthcheck() {
+	command -v $(xray_bin) >/dev/null 2>&1 || return 1
+	has_valid_server $(uci_get_by_type general server) && uci_bool_by_type 'transparent_proxy' 'enable' || return 1
+	uci_bool_by_type transparent_proxy no_healthcheck && return 0
+
+	LOGTIME=$(date "+%Y-%m-%d %H:%M:%S")
+	pgrep -f "/var/etc/$NAME.json" >/dev/null 2>&1 || {
+		echo "[${LOGTIME}] Problem decteted, restarting ${NAME}..."
+		stop >/dev/null 2>&1
+		start >/dev/null 2>&1
+		return 0
+	}
+	iptables -n -t nat -L PREROUTING | grep -q '_SPEC_LAN_DG' || {
+		echo "[${LOGTIME}] Problem decteted, restarting ${NAME}..."
+		stop >/dev/null 2>&1
+		start >/dev/null 2>&1
+		return 0
+	}
+
+	cat_connect() {
+		target="$1"
+		retry=${2:-1}
+		timeout=5
+		[ $retry -lt 1 ] && return 1
+		if which wait4x >/dev/null 2>&1; then # use [wait4x]
+			wait4x -i300ms -t5s http $target
+		elif which wait-for >/dev/null 2>&1; then # use [wait-for]
+			wait-for -t=5s http --url=$target >/dev/null 2>&1
+		else # use [curl]
+			ret_code=$(curl -s --connect-timeout $timeout "$target" -w %{http_code} -o /dev/null | tail -n1)
+			# echo -n "[ $retry $ret_code ] "
+			[ "x$ret_code" = "x200" -o "x$ret_code" = "x204" ] && return 0 || sleep 1 && cat_connect $target $((retry - 1))
+		fi
+	}
+
+	TRPORT=$(uci_get_by_type transparent_proxy local_port 1234)
+	DNSPOD=119.29.29.98 #DNSPOD HTTPDNS (Inside GFW)
+
+	# DNSCHECK
+	if [ "Z$(ping -4 -q -c 1 -s 0 -W 1 -w 1 ${WATCHDOG_ENDPOINT} 2>/dev/null | sed '1{s/[^(]*(//;s/).*//;q}')" = "Z" ]; then
+		iptables -t nat -I OUTPUT -p tcp -d $DNSPOD -j RETURN
+		cat_connect "http://${DNSPOD}/d"
+		if [ "Z$?" = "Z0" ]; then
+			echo "[${LOGTIME}] Problem-DNS decteted, restarting ${NAME}..."
+			[ -x /etc/init.d/dnsmasq-extra ] && /etc/init.d/dnsmasq-extra restart || /etc/init.d/dnsmasq restart
+			stop >/dev/null 2>&1
+			start >/dev/null 2>&1
+		else
+			echo '['$LOGTIME'] Network Problem. Do nothing.'
+		fi
+		while iptables -t nat -D OUTPUT -p tcp -d $DNSPOD -j RETURN 2>/dev/null; do :; done
+		return 0
+	fi
+
+	# iptables -t nat -I OUTPUT -p tcp -d $WATCHDOG_ENDPOINT_IP0 -j REDIRECT --to-port $TRPORT
+	# iptables -t nat -I OUTPUT -p tcp -d $WATCHDOG_ENDPOINT_IP1 -j REDIRECT --to-port $TRPORT
+	iptables -t nat -I OUTPUT -p tcp -d $DNSPOD -j RETURN
+	cat_connect "https://${WATCHDOG_ENDPOINT}/cdn-cgi/trace" 3
+	if [ "Z$?" = "Z0" ]; then
+		echo "[${LOGTIME}] ${NAME} No Problem."
+	else
+		# cat_connect "http://wifi.vivo.com/generate_204"
+		# cat_connect "http://wifi.vivo.com.cn/generate_204"
+		# cat_connect "http://www.qualcomm.cn/generate_204"
+		# cat_connect "http://connectivitycheck.platform.hicloud.com/generate_204"
+		cat_connect "http://${DNSPOD}/d"
+		if [ "Z$?" = "Z0" ]; then
+			echo "[${LOGTIME}] Problem decteted, restarting ${NAME}..."
+			[ -x /etc/init.d/haproxy-tcp ] && /etc/init.d/haproxy-tcp restart >/dev/null 2>&1
+			stop >/dev/null 2>&1
+			start >/dev/null 2>&1
+		else
+			echo '['$LOGTIME'] Network Problem. Do nothing.'
+		fi
+	fi
+
+	# while iptables -t nat -D OUTPUT -p tcp -d $WATCHDOG_ENDPOINT_IP0 -j REDIRECT --to-port $TRPORT 2>/dev/null; do :; done
+	# while iptables -t nat -D OUTPUT -p tcp -d $WATCHDOG_ENDPOINT_IP1 -j REDIRECT --to-port $TRPORT 2>/dev/null; do :; done
+	while iptables -t nat -D OUTPUT -p tcp -d $DNSPOD -j RETURN 2>/dev/null; do :; done
+	return 0
+}

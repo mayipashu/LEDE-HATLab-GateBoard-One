@@ -1,0 +1,14 @@
+{
+	"luci-app-rtp2httpd": {
+		"description": "Grant access to rtp2httpd procedures",
+		"read": {
+			"ubus": {
+				"luci.rtp2httpd": ["status"]
+			},
+			"uci": ["rtp2httpd"]
+		},
+		"write": {
+			"uci": ["rtp2httpd"]
+		}
+	}
+}

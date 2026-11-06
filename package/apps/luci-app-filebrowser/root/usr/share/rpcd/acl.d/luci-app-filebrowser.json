@@ -1,0 +1,11 @@
+{
+	"luci-app-filebrowser": {
+		"description": "Grant access to FileBrowser configuration",
+		"read": {
+			"uci": ["filebrowser"]
+		},
+		"write": {
+			"uci": ["filebrowser"]
+		}
+	}
+}

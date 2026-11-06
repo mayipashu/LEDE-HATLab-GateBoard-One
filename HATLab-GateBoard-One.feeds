@@ -1,4 +1,10 @@
-src-git packages https://github.com/coolsnowwolf/packages^970d7296e646918746df95396eb12e3a344668a0
+# GateBoard-One 使用的 feeds（按提交固定，保证可复现）
+# packages: immortalwrt 的 openwrt-21.02 分支，与本树（21.02.3 / GCC 8.4）同年份，
+#           提供 samba4 / p910nd / frp / filebrowser / xray-core / golang / node 等
+src-git packages https://github.com/immortalwrt/packages^e09f3c7d1903cfe7f523e209ab3ec778013ba309
+
+# luci: openwrt 官方 openwrt-21.02 分支（2023-07 快照，经典 Lua CBI 界面）
 src-git luci https://github.com/openwrt/luci.git^e4c46338b196e486a88b1a75b78e283708c82bc4
+
 src-git routing https://git.openwrt.org/feed/routing.git^a0d61bddb3ce4ca54bd76af86c28f58feb6cc044
 src-git telephony https://git.openwrt.org/feed/telephony.git^0183c1adda0e7581698b0ea4bff7c08379acf447
