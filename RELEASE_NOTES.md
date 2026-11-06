@@ -1,5 +1,9 @@
 **OpenWrt 21.02.3 / Linux 5.4.190** · 设备：HATLab GateBoard-One（MediaTek MT7621）
 
+> 版本命名：`v<年>.<月>.<日>.<序号>`，例如 `v2026.11.07.1`。
+> 每次构建都发布一个**独立版本**，历史版本永久保留、可随时回滚；最新版本标记为 `latest`。
+> 旧的基础版（不含本次新增功能）归档在 `v2026.11.06-base`。
+
 ## 路由与 Web 管理
 - **LuCI** 管理界面（Bootstrap 主题，中文/英文），HTTPS 访问（luci-ssl-openssl）
 - 防火墙页面 + opkg 软件包管理页面

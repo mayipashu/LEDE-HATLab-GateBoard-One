@@ -202,20 +202,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG=latest
+
+          # 每次构建都发布一个独立版本，绝不覆盖历史版本。
+          # 版本号 = 日期 + 当天构建序号（同一天可能多次构建）：
+          #   v2026.11.07.1 / v2026.11.07.2 ...
+          # 同时把带新固件的这个版本标记为 latest，方便直接下载。
+          DATE=$(date -u +%Y.%m.%d)
+          N=1
+          while gh release view "v${DATE}.${N}" >/dev/null 2>&1; do
+            N=$((N+1))
+          done
+          TAG="v${DATE}.${N}"
+
           NOTES=$(mktemp)
           cp ./RELEASE_NOTES.md "$NOTES"
-          printf '\n---\n构建：OpenWrt 21.02.3-r16554-1d4dea6d4f，提交 `%s`\n' "${{ github.sha }}" >> "$NOTES"
+          printf '\n---\n- 构建时间（UTC）：%s\n- OpenWrt：21.02.3-r16554-1d4dea6d4f\n- 提交：`%s`\n' \
+            "$(date -u +'%Y-%m-%d %H:%M')" "${{ github.sha }}" >> "$NOTES"
 
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --title "HATLab GateBoard-One 固件（latest）" --latest --notes-file "$NOTES"
-
-          gh release upload "$TAG" \
+          echo "即将发布新版本：$TAG"
+          gh release create "$TAG" \
+            --title "固件 ${TAG}（EasyTier/Lucky/frpc/FileBrowser/Xray/rtp2httpd/Samba/DHCPv6/打印机）" \
+            --latest \
+            --notes-file "$NOTES" \
             ./artifact/firmware/*.img \
             ./artifact/firmware/*.itb \
             ./artifact/firmware/*hatlab_gateboard-one.manifest \
-            ./artifact/firmware/*sha256sums \
-            --clobber
+            ./artifact/firmware/*sha256sums
 
-          gh release edit "$TAG" --notes-file "$NOTES" --latest
           echo "released: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG"
