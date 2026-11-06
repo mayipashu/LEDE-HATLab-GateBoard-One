@@ -164,31 +164,48 @@ jobs:
           set -euo pipefail
           TAG=latest
           NOTES=$(mktemp)
-          {
-            echo "由 GitHub Actions 自动构建的 HATLab GateBoard-One 固件（滚动发布，始终为最新一次成功构建）。"
-            echo
-            echo "- 运行编号：[${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            echo "- 源码提交：\`${{ github.sha }}\`"
-            echo "- 构建时间（UTC）：$(date -u '+%Y-%m-%d %H:%M')"
-            echo
-            echo "### 内置软件版本"
-            echo '```'
-            grep -E '^(n2n|n2n-utils|tinc|kmod-tun|cgi-io|luci-base|luci-app-opkg|luci-ssl-openssl) ' ./artifact/firmware/*.manifest || true
-            echo '```'
-            echo
-            echo "### 文件说明"
-            echo "- \`*-ext4-combined.img\`：整机镜像（写盘 / sysupgrade 均可）"
-            echo "- \`*-ext4-rootfs.img\`：根文件系统"
-            echo "- \`*-ext4-kernel.itb\`：内核"
-            echo "- \`*.manifest\`：已安装软件包清单"
-            echo "- \`sha256sums\`：SHA-256 校验和，刷机前请核对"
-            echo
-            echo "### 已内置功能"
-            echo "- **n2n 3.0**：\`n2n-edge\` / \`n2n-supernode\` / \`n2n-benchmark\` / \`n2n-decode\` / \`n2n-keygen\`，UCI 配置 \`/etc/config/n2n\`，服务 \`/etc/init.d/n2n\`"
-            echo "- **tinc 1.1pre18**：\`/usr/sbin/tincd\`，服务 \`/etc/init.d/tinc\`"
-            echo "- **LuCI** 管理界面（\`luci-ssl-openssl\`，https）"
-            echo "- \`kmod-tun\` 已内置，n2n/tinc 无需额外安装内核模块"
-          } > "$NOTES"
+          cat > "$NOTES" <<'EOF'
+**OpenWrt 21.02.3 / Linux 5.4.190** · 设备：HATLab GateBoard-One（MediaTek MT7621）
+
+## 路由与 Web 管理
+- **LuCI** 管理界面（Bootstrap 主题，中文/英文），HTTPS 访问（luci-ssl-openssl）
+- 防火墙页面 + opkg 软件包管理页面
+- 协议支持：PPPoE、IPv6、3G、QMI、Relay
+- firewall + iptables + fullconenat、dnsmasq-full
+
+## VPN
+- **n2n 3.0**：`n2n-edge`、`n2n-supernode`、`n2n-benchmark`、`n2n-decode`、`n2n-keygen`
+  - UCI 配置 `/etc/config/n2n`，服务 `/etc/init.d/n2n`（`/etc/init.d/n2n enable` 开机自启）
+- **tinc 1.1pre18**：`/usr/sbin/tincd`，服务 `/etc/init.d/tinc`
+- 已内置 `kmod-tun`，n2n/tinc 开箱可用，无需另装内核模块
+
+## 无线
+- MT7621 平台无线：`kmod-mt7615e`、`kmod-mt7603`、`kmod-mt76`、`kmod-mt76x2`
+- 无线扩展卡：`ath9k`、`ath10k`，含 QCA988x / 99x0 / 9984 / 9888 / 9887 / 9377 / 6174 的固件与 board 数据
+- `wpad-openssl`（完整 hostapd/wpa_supplicant，支持 WPA2/WPA3 与 802.11r/k/v 漫游）
+
+## 蜂窝上网（4G/5G 模块）
+- `uqmi`（QMI）、`umbim`（MBIM）、`usb-modeswitch`、`comgt`
+- 内核侧：`kmod-usb-net-qmi-wwan`、`kmod-usb-net-cdc-mbim`、`kmod-usb-net-rndis`、`kmod-usb-net-cdc-ether`、`kmod-usb-serial-option`、`kmod-usb3`
+
+## 存储与磁盘
+- 根文件系统 ext4，支持 `resize2fs` 扩容
+- 文件系统：vfat、exfat、overlay（`kmod-loop` 可挂载镜像）
+- 工具：e2fsprogs、resize2fs、losetup、partx-utils、mtd、ethtool、ebtables
+
+## 系统
+- dropbear SSH、uhttpd、opkg、openssl-util
+
+## 刷机文件
+| 文件 | 说明 |
+|---|---|
+| `*-ext4-combined.img` | 整机镜像，写盘或 sysupgrade |
+| `*-ext4-rootfs.img` | 根文件系统 |
+| `*-ext4-kernel.itb` | 内核 |
+| `*.manifest` | 已安装软件包清单 |
+| `sha256sums` | SHA-256 校验和，刷机前请核对 |
+EOF
+          printf '\n---\n构建：OpenWrt 21.02.3-r16554-1d4dea6d4f，提交 `%s`\n' "${{ github.sha }}" >> "$NOTES"
 
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --title "HATLab GateBoard-One 固件（latest）" --latest --notes-file "$NOTES"
@@ -196,7 +213,7 @@ jobs:
           gh release upload "$TAG" \
             ./artifact/firmware/*.img \
             ./artifact/firmware/*.itb \
-            ./artifact/firmware/*.manifest \
+            ./artifact/firmware/*hatlab_gateboard-one.manifest \
             ./artifact/firmware/*sha256sums \
             --clobber
 
