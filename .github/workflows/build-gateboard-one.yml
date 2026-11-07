@@ -188,6 +188,38 @@ jobs:
             fi
           done
 
+      - name: Verify opkg signing keys for official 21.02 feeds
+        if: success()
+        run: |
+          set -euo pipefail
+          ROOT=./staging_dir/target-mipsel_24kc_musl/root-ramips
+          KEYS="$ROOT/etc/opkg/keys"
+
+          echo "--- $KEYS ---"
+          ls -l "$KEYS" || { echo "::error::/etc/opkg/keys missing"; exit 1; }
+
+          # 21.02 release 签名公钥，缺了它 opkg update 会全部
+          # "Signature check failed" 并把已下载的列表删掉。
+          if [ -f "$KEYS/2f8b0b98e08306bf" ]; then
+            echo "OK      21.02 release key 2f8b0b98e08306bf"
+            grep -q '21.02 release builds' "$KEYS/2f8b0b98e08306bf" \
+              && echo "OK      key comment matches 21.02 release builds"
+          else
+            echo "::error::missing 21.02 release usign key (2f8b0b98e08306bf); opkg update will fail signature checks"
+            exit 1
+          fi
+
+          # 快照签名公钥（原版只装这一把）
+          [ -f "$KEYS/b5043e70f9a75cde" ] \
+            && echo "OK      snapshot key b5043e70f9a75cde" \
+            || echo "WARN    snapshot key missing (not fatal)"
+
+          echo "key count: $(ls -1 "$KEYS" | wc -l)"
+          if [ "$(ls -1 "$KEYS" | wc -l)" -lt 5 ]; then
+            echo "::error::too few usign keys installed, openwrt-keyring install glob likely broken"
+            exit 1
+          fi
+
       - name: Upload firmware
         if: success()
         uses: actions/upload-artifact@v4
