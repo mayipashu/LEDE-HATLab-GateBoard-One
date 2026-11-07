@@ -41,11 +41,7 @@ ifeq ($(ARCH),mips)
   endif
 endif
 ifeq ($(ARCH),mipsel)
-  ifeq ($(CONFIG_SOFT_FLOAT),y)
-    LUCKY_ARCH:=mipsle_softfloat
-  else
-    LUCKY_ARCH:=mipsle_hardfloat
-  endif
+  LUCKY_ARCH:=mipsle_softfloat
 endif
 
 PKG_SOURCE:=lucky_$(PKG_VERSION)_Linux_$(LUCKY_ARCH).tar.gz

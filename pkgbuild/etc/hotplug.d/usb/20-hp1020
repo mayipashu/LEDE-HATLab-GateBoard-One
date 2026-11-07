@@ -1,0 +1,33 @@
+#!/bin/sh
+# HP LaserJet 1020/1022/1023 - host-based (GDI) printer:
+# every power-on/USB reset requires downloading sihp1020.dl firmware before it will print.
+# This script runs on USB add, stops p910nd, writes firmware to /dev/usb/lp0, restarts p910nd.
+
+FW=/usr/share/printer/sihp1020.dl
+
+[ "$ACTION" = "add" ] || exit 0
+[ -f "$FW" ] || { logger -t hp1020 "固件 $FW 不存在，跳过"; exit 0; }
+
+# HP 1020 product ID
+case "$PRODUCT" in
+	3f0/2b17/*|3f0/2b17) ;;
+	*) exit 0 ;;
+esac
+
+# 等待设备节点出现（整数秒，busybox 不支持小数）
+i=0
+while [ $i -lt 30 ]; do
+	[ -c /dev/usb/lp0 ] && break
+	i=$((i+1))
+	sleep 1
+done
+[ -c /dev/usb/lp0 ] || { logger -t hp1020 "lp0 未出现"; exit 0; }
+
+logger -t hp1020 "检测到 HP LaserJet 1020，开始下载固件"
+/etc/init.d/p910nd stop >/dev/null 2>&1
+sleep 1
+cat "$FW" > /dev/usb/lp0 2>/dev/null
+rc=$?
+sleep 1
+/etc/init.d/p910nd start >/dev/null 2>&1
+logger -t hp1020 "固件下载完成 (rc=$rc)"
