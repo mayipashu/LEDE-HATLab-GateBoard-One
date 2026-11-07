@@ -3,7 +3,7 @@
 
 m = Map("filebrowser", translate("FileBrowser"), translate("网页版文件管理器，可在浏览器中浏览、上传、下载、重命名、编辑路由器上的文件。"))
 
-s = m:section(TypedSection, "config", translate("基本设置"))
+s = m:section(TypedSection, "filebrowser", translate("基本设置"))
 s.anonymous = true
 
 o = s:option(Flag, "enabled", translate("启用"))
