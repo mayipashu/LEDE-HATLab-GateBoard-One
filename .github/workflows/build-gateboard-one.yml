@@ -5,13 +5,12 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/build-gateboard-one.yml'
-      - 'HATLab-GateBoard-One.config'
-      - 'HATLab-GateBoard-One.feeds'
-      - 'package/n2n/**'
-      - 'package/tinc/**'
-      - 'include/prereq-build.mk'
+    # 注意：不要加 paths 过滤。package/ 下的本地定制包（lucky/p910nd/
+    # filebrowser 等）改动也必须触发重新构建，否则 Releases 里发布的固件
+    # 会缺少这些修复。早先的 paths 白名单只有 n2n/tinc，导致 luci-app-filebrowser
+    # 的 CBI 修复从未被编译进固件。
+    paths-ignore:
+      - '**/*.md'
 
 permissions:
   contents: write
@@ -84,6 +83,12 @@ jobs:
           # USB 打印机
           ./scripts/feeds install p910nd 2>/dev/null || true
 
+          # SFTP：dropbear 2022.82 内置 sftp 子系统，执行 /usr/libexec/sftp-server，
+          # 但不附带该程序本体。sftp-server 二进制由本树的
+          # package/apps/openssh-sftp-server 提供（复用官方 21.02.3 预编译 ipk）。
+          # 故意不从 feed 安装 net/openssh：它定义同名包 Package/openssh-sftp-server，
+          # 会与本树包冲突。
+
           echo "--- package/feeds 内容 ---"
           ls -1 package/feeds/
           ls -1 package/feeds/packages/ || true
@@ -106,7 +111,8 @@ jobs:
                frpc luci-app-frpc \
                filebrowser luci-app-filebrowser \
                xray-core luci-app-xray \
-               rtp2httpd luci-app-rtp2httpd"
+               rtp2httpd luci-app-rtp2httpd \
+               openssh-sftp-server"
           missing=0
           for s in $REQ; do
             if grep -q "^CONFIG_PACKAGE_${s}=y$" .config; then
@@ -160,13 +166,15 @@ jobs:
                    etc/init.d/odhcpd usr/sbin/odhcpd usr/sbin/odhcp6c \
                    usr/sbin/ksmbd.mountd usr/sbin/smbd \
                    usr/sbin/p910nd etc/init.d/p910nd etc/config/p910nd \
+                   usr/share/printer/sihp1020.dl etc/hotplug.d/usb/20-hp1020 \
                    usr/bin/easytier-core usr/bin/easytier-cli \
                    etc/init.d/easytier etc/config/easytier \
                    usr/bin/lucky etc/init.d/lucky etc/config/lucky \
                    usr/bin/frpc etc/init.d/frpc etc/config/frpc \
                    usr/bin/filebrowser etc/init.d/filebrowser etc/config/filebrowser \
                    usr/bin/xray \
-                   usr/bin/rtp2httpd etc/init.d/rtp2httpd etc/config/rtp2httpd; do
+                   usr/bin/rtp2httpd etc/init.d/rtp2httpd etc/config/rtp2httpd \
+                   usr/lib/sftp-server usr/libexec/sftp-server usr/sbin/dropbear; do
             if [ -e "$ROOT/$f" ]; then
               echo "OK      /$f"
             else

@@ -49,8 +49,15 @@
 ## USB 打印机
 - **p910nd 0.97**：USB 打印机 RAW/JetDirect 打印服务器（端口 9100）
 - **kmod-usb-printer**：USB 打印机内核支持
-- 热插拔脚本自动识别 `/dev/usb/lp0` 并拉起服务，无需手工配置
+- 内置 HP LaserJet 1020 固件 `sihp1020.dl`，USB 插入时热插拔脚本
+  自动完成固件下载（该机型无自带固件，每次上电都必须重新下载）
 - 配合 Samba4 可同时提供 Windows 共享打印
+
+## SFTP
+- **openssh-sftp-server 8.4p1**：提供 `/usr/libexec/sftp-server`
+- dropbear 2022.82 内置 sftp 子系统，与之配合即可用 SFTP 传输文件
+- 保留 dropbear 作为 SSH 服务器，`ssh root@路由器IP` 登录方式不变
+- 用法：`sftp root@路由器IP`，或在 FileZilla/WinSCP 中选 SFTP 协议
 
 ## VPN
 - **n2n 3.0**：`n2n-edge`、`n2n-supernode`、`n2n-benchmark`、`n2n-decode`、`n2n-keygen`
