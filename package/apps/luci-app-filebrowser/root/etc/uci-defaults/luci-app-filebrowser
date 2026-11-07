@@ -1,0 +1,14 @@
+#!/bin/sh
+
+uci -q batch <<-EOF >/dev/null
+	delete ucitrack.@filebrowser[-1]
+	add ucitrack filebrowser
+	set ucitrack.@filebrowser[-1].init=filebrowser
+	commit ucitrack
+EOF
+
+rm -f /tmp/luci-indexcache
+# LuCI 21.02 的 luci.cacheloader 会把模型编译成字节码缓存放在
+# /tmp/luci-modulecache/，不清掉的话新安装的 CBI 模型不会生效。
+rm -rf /tmp/luci-modulecache/
+exit 0

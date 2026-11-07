@@ -1,38 +1,113 @@
 #!/bin/sh /etc/rc.common
-# FileBrowser init script for OpenWrt 21.02
-# 兼容 UCI 配置节类型 "filebrowser"
+# Copyright (C) 2018-2020 Lienol <lawlienol@gmail.com>
+# Improve by xiaozhuai <xiaozhuai7@gmail.com>
+# Improve by superzjg <superzjg@gmail.com>
+#
+# GateBoard-One 适配版：
+#   原版要求把 filebrowser 二进制放在 $executable_directory 下（默认 /tmp），
+#   需要在网页上手动下载。本固件已把二进制预装到 /usr/bin/filebrowser，
+#   因此直接使用该路径，跳过在线下载流程。
 
 START=99
 USE_PROCD=1
 
-PROG=/usr/bin/filebrowser
+LOG_PATH="/var/log/filebrowser.log"
+BIN_PATH="/usr/bin/filebrowser"
+
+echolog() {
+	echo -e "$(date "+%Y-%m-%d %H:%M:%S"): $1" >> $LOG_PATH
+}
+
+config_t_get() {
+	local index=0
+	[ -n "$4" ] && index=$4
+	local ret=$(uci get filebrowser.@$1[$index].$2 2>/dev/null)
+	echo ${ret:=$3}
+}
+firewall_set=$(config_t_get global firewall_set no)
+
+add_firewall() {
+	if [ "$firewall_set" != "no" ]; then
+		[ "$firewall_set" == "check" ] && [ -n "$(uci -q show firewall.filebrowser_auto)" ] && return 0
+		uci -q delete firewall.filebrowser_auto
+		uci set firewall.filebrowser_auto=rule
+		uci set firewall.filebrowser_auto.name="filebrowser_auto"
+		uci set firewall.filebrowser_auto.target="ACCEPT"
+		uci set firewall.filebrowser_auto.src="wan"
+		uci set firewall.filebrowser_auto.proto="tcp"
+		uci set firewall.filebrowser_auto.dest_port="$PORT"
+		uci set firewall.filebrowser_auto.enabled="1"
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+del_firewall() {
+	if [ "$firewall_set" != "check" ]; then
+		if [ -n "$(uci -q show firewall.filebrowser_auto)" ]; then
+			uci -q delete firewall.filebrowser_auto
+			uci commit firewall
+			/etc/init.d/firewall reload >/dev/null 2>&1
+		fi
+	fi
+}
 
 start_service() {
-	local enabled listen_port root_path base_url disable_exec
+	ENABLED=$(config_t_get global enable 0)
+	[ "$ENABLED" = "0" ] && return
 
-	config_load filebrowser
-	config_get enabled "config" enabled 0
-	config_get listen_port "config" listen_port 8989
-	config_get root_path "config" root_path "/"
-	config_get base_url "config" base_url ""
-	config_get disable_exec "config" disable_exec 1
+	ADDRESS=$(config_t_get global address 0.0.0.0)
+	PORT=$(config_t_get global port 8989)
+	DATABASE=$(config_t_get global database /etc/filebrowser.db)
+	SSL=$(config_t_get global ssl 0)
+	SSL_CERT=$(config_t_get global ssl_cert)
+	SSL_KEY=$(config_t_get global ssl_key)
+	ROOT_PATH=$(config_t_get global root_path /)
+	extrFlag=$(config_t_get global extrFlag)
 
-	[ "$enabled" -ne 1 ] && exit 0
-
-	procd_open_instance
-	procd_set_param command "$PROG" -p "$listen_port" -r "$root_path"
-
-	if [ -n "$base_url" ]; then
-		procd_append_param command --baseurl "$base_url"
+	# 二进制由固件预装，无需在线下载
+	if [ ! -x "$BIN_PATH" ]; then
+		echolog "---> 未找到 filebrowser 二进制 $BIN_PATH"
+		return 1
 	fi
-	[ "$disable_exec" -eq 1 ] && procd_append_param command --disable-exec
 
+	# 服务启动是 procd 在函数退出后统一处理，启动后执行特定代码需子进程后台执行
+	(
+	[ -f "$DATABASE" ] || {
+		true >$LOG_PATH
+		i=16; str=""
+		until [ -n "$str" ]; do
+			i=$(($i - 1))
+			[ "$i" -lt 0 ] && break
+			str=$(grep 'password' $LOG_PATH |grep 'admin' |awk '{print $NF}')
+			sleep 1
+		done
+		echolog "---> First startup. Please change the initial password for the default user admin promptly, which is: ${str}"
+		echolog "---> 首次启动，请及时更改用户 admin 的初始密码：${str}"
+		}
+	) &
+
+	SSL_PARAMS=""
+	if [ $SSL -eq 1 ];then
+		[ -n "$SSL_CERT" ] && [ -n "$SSL_KEY" ] && SSL_PARAMS="-t $SSL_CERT -k $SSL_KEY"
+	fi
+	add_firewall
+
+	procd_open_instance filebrowser
+	procd_set_param command /bin/sh
+	procd_append_param command -c "exec $BIN_PATH -a $ADDRESS -p $PORT -r $ROOT_PATH -d $DATABASE $SSL_PARAMS $extrFlag >> $LOG_PATH 2>&1"
 	procd_set_param respawn
-	procd_set_param stdout 1
-	procd_set_param stderr 1
 	procd_close_instance
 }
 
 service_triggers() {
 	procd_add_reload_trigger "filebrowser"
+}
+
+stop_service() {
+	del_firewall
+}
+
+# 重定义reload否则不执行stop_service
+reload_service() {
+	restart
 }

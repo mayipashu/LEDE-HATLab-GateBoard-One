@@ -109,7 +109,7 @@ jobs:
                easytier luci-app-easytier \
                lucky luci-app-lucky \
                frpc luci-app-frpc \
-               filebrowser luci-app-filebrowser \
+               filebrowser luci-app-filebrowser luci-i18n-filebrowser-zh-cn \
                xray-core luci-app-xray \
                rtp2httpd luci-app-rtp2httpd \
                openssh-sftp-server"
@@ -172,6 +172,8 @@ jobs:
                    usr/bin/lucky etc/init.d/lucky etc/config/lucky \
                    usr/bin/frpc etc/init.d/frpc etc/config/frpc \
                    usr/bin/filebrowser etc/init.d/filebrowser etc/config/filebrowser \
+                   usr/lib/lua/luci/model/cbi/filebrowser/settings.lua \
+                   usr/lib/lua/luci/i18n/filebrowser.zh-cn.lmo \
                    usr/bin/xray \
                    usr/bin/rtp2httpd etc/init.d/rtp2httpd etc/config/rtp2httpd \
                    usr/lib/sftp-server usr/libexec/sftp-server usr/sbin/dropbear; do
