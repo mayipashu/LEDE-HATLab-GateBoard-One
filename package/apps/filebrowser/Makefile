@@ -37,7 +37,6 @@ define Package/filebrowser/description
 endef
 
 define Package/filebrowser/conffiles
-/etc/config/filebrowser
 endef
 
 define Build/Prepare
@@ -54,6 +53,19 @@ endef
 
 define Package/filebrowser/install
 	$(CP) $(UNPACK_DIR)/* $(1)/
+	# 上游 ipk 自带一份 /etc/init.d/filebrowser，但它读的是
+	# `config filebrowser 'config'` 这套旧节名；本固件改用
+	# luci-app-filebrowser 提供的适配版脚本（读 `config global`，
+	# 并直接用预装的 /usr/bin/filebrowser）。
+	#
+	# 两者若同时安装，opkg 会因 check_data_file_clashes 报
+	#   Package luci-app-filebrowser wants to install .../etc/init.d/filebrowser
+	#   But that file is already provided by package filebrowser
+	# 导致整个镜像构建在 package/install 阶段失败。
+	# 同理 /etc/config/filebrowser 也统一由 luci-app-filebrowser 提供，
+	# 避免两个包各自带不同 schema 的同名配置文件。
+	rm -f $(1)/etc/init.d/filebrowser
+	rm -f $(1)/etc/config/filebrowser
 endef
 
 $(eval $(call BuildPackage,filebrowser))
