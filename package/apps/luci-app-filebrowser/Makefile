@@ -33,10 +33,14 @@ define Package/luci-app-filebrowser/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller \
 		$(1)/usr/lib/lua/luci/model/cbi \
 		$(1)/etc/uci-defaults \
+		$(1)/etc/init.d \
+		$(1)/etc/config \
 		$(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./luasrc/controller/filebrowser.lua $(1)/usr/lib/lua/luci/controller/filebrowser.lua
 	$(INSTALL_DATA) ./luasrc/model/cbi/filebrowser.lua $(1)/usr/lib/lua/luci/model/cbi/filebrowser.lua
 	$(INSTALL_BIN) ./root/etc/uci-defaults/luci-filebrowser $(1)/etc/uci-defaults/luci-filebrowser
+	$(INSTALL_BIN) ./root/etc/init.d/filebrowser $(1)/etc/init.d/filebrowser
+	$(INSTALL_DATA) ./root/etc/config/filebrowser $(1)/etc/config/filebrowser
 	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/luci-app-filebrowser.json $(1)/usr/share/rpcd/acl.d/luci-app-filebrowser.json
 endef
 

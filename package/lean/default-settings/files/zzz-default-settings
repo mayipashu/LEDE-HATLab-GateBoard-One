@@ -57,4 +57,31 @@ echo 'hsts=0' > /root/.wgetrc
 rm -rf /tmp/luci-modulecache/
 rm -f /tmp/luci-indexcache
 
+# 预先完成 LuCI 网桥配置迁移 + ifname 配置迁移
+# 避免用户第一次进"网络"页面时弹出 2 次"继续"确认框
+uci -q batch <<-EOF
+	set network.lan.proto='static'
+	set network.lan.netmask='255.255.255.0'
+	set network.lan.ip6assign='60'
+	# 网桥配置：从旧格式 option ifname "eth0 eth1 ..." 迁移到新格式 device 节
+	delete network.lan.ifname
+	set network.@device[0].name='br-lan'
+	set network.@device[0].type='bridge'
+	delete network.@device[0].ifname
+	# 把所有物理端口作为 list ports 加入网桥
+	list network.@device[0].ports='eth0'
+	list network.@device[0].ports='eth1'
+	list network.@device[0].ports='eth2'
+	list network.@device[0].ports='eth3'
+	list network.@device[0].ports='eth4'
+	# WAN/WAN6 接口：从旧格式 ifname 迁移到新格式 device
+	set network.wan.proto='dhcp'
+	set network.wan.device='eth5'
+	delete network.wan.ifname
+	set network.wan6.proto='dhcpv6'
+	set network.wan6.device='eth5'
+	delete network.wan6.ifname
+	commit network
+EOF
+
 exit 0
